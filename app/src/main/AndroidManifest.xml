@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- A TV box has no touchscreen in any meaningful sense. Declaring these
+         optional keeps the package installable on TV hardware, which is the only
+         hardware this targets. -->
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+    <uses-feature android:name="android.software.leanback" android:required="false" />
+
+    <application
+        android:label="TV Remote Assist"
+        android:allowBackup="false"
+        android:supportsRtl="true">
+
+        <!-- The whole point of the app. Once enabled, the system starts this
+             service on every boot by itself: no BOOT_COMPLETED receiver and no
+             foreground service needed. That is the persistence story for boxes
+             where /vendor cannot be written. -->
+        <service
+            android:name=".RemoteAssistService"
+            android:exported="true"
+            android:label="TV Remote Assist"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
+    </application>
+</manifest>

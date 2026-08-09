@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  flagRetrieveInteractiveWindows is what makes the focused node reachable across
+  windows; without it getRootInActiveWindow can miss the window that actually has
+  focus on a TV launcher.
+
+  canPerformGestures is declared but is NOT the pointer story; see DESIGN.md.
+  dispatchGesture delivers absolute touch events, and a TV UI consumes D-pad
+  focus, not touch. It is declared so the capability can be measured on real
+  hardware rather than assumed away.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeAllMask"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagDefault|flagRetrieveInteractiveWindows|flagReportViewIds"
+    android:canRetrieveWindowContent="true"
+    android:canPerformGestures="true"
+    android:notificationTimeout="100"
+    android:description="@string/service_description" />
