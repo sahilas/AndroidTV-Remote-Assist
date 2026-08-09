@@ -144,15 +144,53 @@ not start:
 adb shell settings get secure enabled_accessibility_services
 ```
 
+## Universal release build — tested on both boxes
+
+`./gradlew assembleRelease` produces one **universal** APK: every ABI in a single file, each
+carrying its own copy of the parent repo's Go server. A per-ABI split would be smaller but
+would mean picking the right file by hand at sideload time, which is worse for a project
+whose whole point is that the TV has no working remote.
+
+Signed with a local key (`release.keystore` + `keystore.properties`, both gitignored). A
+fresh clone with no key still builds — the release variant falls back to unsigned rather
+than failing, so a contributor is not blocked on being handed signing material.
+
+| | Emulator | Projector |
+|---|---|---|
+| box | Google ATV image | HiSilicon Hi3751V350 (Zeasn Whale OS) |
+| ABI / SDK / SELinux | `arm64-v8a` / 31 / **Enforcing** | `armeabi-v7a` / 31 / Permissive |
+| install | ✅ | ✅ |
+| service binds | ✅ | ✅ |
+| ABI-correct binary selected | ✅ `lib/arm64` | ✅ `lib/arm` |
+| exec from `nativeLibraryDir` | ✅ `exit=0 canExec=true` | ✅ `exit=0 canExec=true` |
+
+Both ran the binary and got its usage output back, so these are real execs on both
+architectures. The projector result matters most: it is a non-Google-certified build, and
+its accessibility framework works anyway.
+
+APK is 13 MB for all four ABIs; `aapt` confirms it is not debuggable.
+
+### The probe is off unless you ask for it
+
+The release build registers **no** receiver by default. Enable it deliberately:
+
+```bash
+adb shell setprop debug.tvassist.probe 1
+```
+
+Verified on the emulator: with the property cleared, the service connects, registers nothing,
+and a broadcast produces no result at all. The property does not survive a reboot, so it
+cannot be left on by accident. This replaces the earlier always-on receiver, which would have
+let anything on the device drive the focused UI.
+
 ## Status
 
 Scaffold. Gradle project, manifest, service config, and a service that builds, installs,
 binds and has been measured on a real Android TV image. **No transport and no wiring to the
 Go server yet.**
 
-⚠️ `RemoteAssistService` registers a debug `BroadcastReceiver` so capabilities can be probed
-over `adb` before any transport exists. **It must not survive into a shipped build** —
-anything on the device could broadcast to it and drive the focused UI.
+The probe `BroadcastReceiver` is gated behind the `debug.tvassist.probe` system property and
+is absent from a release build unless explicitly enabled. See above.
 
 Nothing in this document has been tested on a Fire TV. Both boxes referenced are a HiSilicon
 projector (`userdebug`, Permissive, API 31) and a Google ATV emulator image (`user`,
@@ -169,5 +207,6 @@ Enforcing, API 31).
    without root.
 5. Make the app start the Go binary at boot: launch from `onServiceConnected`, supervise it,
    and pass the same flags `device/boot.sh` passes today.
-6. Remove the debug receiver before anything ships.
+6. ~~Remove the debug receiver before anything ships.~~ **Done differently** — gated behind
+   `debug.tvassist.probe`, so a release build registers nothing unless explicitly enabled.
 7. Test on real Fire TV hardware. Everything here is one emulator image.

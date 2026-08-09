@@ -15,3 +15,7 @@ local.properties
 
 # test-only: the Go binary is copied in to answer the nativeLibraryDir exec question
 app/src/main/jniLibs/
+
+# local signing material — never commit
+release.keystore
+keystore.properties

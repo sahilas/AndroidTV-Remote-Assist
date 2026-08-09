@@ -25,10 +25,14 @@ import java.io.File
  */
 class RemoteAssistService : AccessibilityService() {
 
-    // Debug-only trigger so the capabilities can be measured over adb before any
-    // transport exists. Registered at runtime rather than in the manifest, and it
-    // MUST NOT survive into a shipped build: anything on the device could
-    // broadcast to it and drive the focused UI.
+    // Probe trigger, so capabilities can be measured over adb before any transport
+    // exists. Registered ONLY when the property below is set, because an always-on
+    // receiver would let anything on the device drive the focused UI:
+    //
+    //     adb shell setprop debug.tvassist.probe 1
+    //
+    // A release build with the property unset registers nothing. The property does
+    // not survive a reboot, so this cannot be left on by accident.
     private val debug = object : BroadcastReceiver() {
         override fun onReceive(c: Context?, i: Intent?) {
             when (i?.getStringExtra("op")) {
@@ -39,14 +43,32 @@ class RemoteAssistService : AccessibilityService() {
         }
     }
 
+    private var probeRegistered = false
+
     override fun onServiceConnected() {
         super.onServiceConnected()
-        Log.i(TAG, "connected; sdk=${android.os.Build.VERSION.SDK_INT}")
-        registerReceiver(debug, IntentFilter(DEBUG_ACTION))
+        val abi = android.os.Build.SUPPORTED_ABIS.firstOrNull()
+        Log.i(TAG, "connected; sdk=${android.os.Build.VERSION.SDK_INT} abi=$abi " +
+            "nativeLibDir=${applicationInfo.nativeLibraryDir}")
+        if (probeEnabled()) {
+            registerReceiver(debug, IntentFilter(DEBUG_ACTION))
+            probeRegistered = true
+            Log.i(TAG, "probe receiver registered (debug.tvassist.probe=1)")
+        }
+    }
+
+    /** Reads a system property without the hidden SystemProperties API. */
+    private fun probeEnabled(): Boolean = try {
+        val p = ProcessBuilder("/system/bin/getprop", PROBE_PROP).start()
+        val v = p.inputStream.bufferedReader().readText().trim()
+        p.waitFor()
+        v == "1"
+    } catch (e: Exception) {
+        false
     }
 
     override fun onDestroy() {
-        runCatching { unregisterReceiver(debug) }
+        if (probeRegistered) runCatching { unregisterReceiver(debug) }
         super.onDestroy()
     }
 
@@ -146,5 +168,6 @@ class RemoteAssistService : AccessibilityService() {
     companion object {
         private const val TAG = "RemoteAssist"
         const val DEBUG_ACTION = "dev.sahilas.tvassist.DEBUG"
+        private const val PROBE_PROP = "debug.tvassist.probe"
     }
 }
