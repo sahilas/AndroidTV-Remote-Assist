@@ -183,6 +183,63 @@ and a broadcast produces no result at all. The property does not survive a reboo
 cannot be left on by accident. This replaces the earlier always-on receiver, which would have
 let anything on the device drive the focused UI.
 
+## Boot launch works — and exposed a blocking conflict
+
+The service now provisions the server's files into its own storage and starts the binary on
+connect, which the system does on every boot. **Persistence is proven**: after a full device
+reboot with no intervention, `ps` showed
+
+```
+u0_a114  libtlsproxy.so -listen :8543 -dir /data/user/0/dev.sahilas.tvassist/files/tvremote
+```
+
+and the server answered 401 without a token, 200 with one, served the embedded UI, served
+`/ca.crt` in the clear, and 404'd `key.pem`. That is the whole reason the app exists, and it
+works.
+
+### But the hosted server loses the features it had
+
+Running under the **app** uid instead of **shell**, key injection, text and app launch all
+fail:
+
+```
+keyevent volup(24): exit status 255
+app list: android.intent.category.LEANBACK_LAUNCHER: exit status 255
+```
+
+`/system/bin/input` and `/system/bin/cmd` are world-executable, so this is not a file
+permission problem — `am`/`cmd` check the *calling uid's* privileges, and an app uid has
+none of them. The shell uid does, which is why the same binary works when adb starts it.
+
+So the two goals are currently in direct conflict:
+
+| Launched by | Persistence | D-pad / text / app launch |
+|---|---|---|
+| `adb` as **shell** (parent repo today) | ❌ dies on reboot | ✅ works |
+| this app as **app uid** | ✅ survives reboot | ❌ `exit status 255` |
+
+A remote that survives reboot but whose every button 500s is worse than one that needs
+restarting, so **this is not shippable as-is.**
+
+### What could resolve it, and what cannot
+
+- **App performs the actions itself, server just routes.** App launch is straightforward
+  via `PackageManager` + `startActivity`. BACK and HOME exist as
+  `performGlobalAction`. Text may work via `ACTION_SET_TEXT`.
+- **D-pad is the blocker.** It is the core of a TV remote, and there is no accessibility
+  route to it before **API 34** (`GLOBAL_ACTION_DPAD_*`). Both boxes tested are API 31, so
+  on those it cannot be done at all.
+- **Running the child as shell is not an option** — a process started by the app inherits
+  the app's uid.
+
+That makes the app's value conditional on the box: genuinely useful on API 34+, and on API
+31 it can offer persistence only by giving up the D-pad. Worth measuring on an API 34 image
+before building further.
+
+Also degraded under the app uid: mDNS. `net.InterfaceAddrs()` returns nothing, logged as
+`mdns: no non-loopback IPv4 found`, because interface enumeration is restricted for apps.
+The IP still works; only the `.local` name is lost.
+
 ## Status
 
 Scaffold. Gradle project, manifest, service config, and a service that builds, installs,
@@ -205,8 +262,17 @@ Enforcing, API 31).
 4. Decide whether persistence alone justifies the app. It probably does: on a locked box the
    parent repo currently dies on every reboot, and this is the only route to fixing that
    without root.
-5. Make the app start the Go binary at boot: launch from `onServiceConnected`, supervise it,
-   and pass the same flags `device/boot.sh` passes today.
+5. ~~Make the app start the Go binary at boot.~~ **Done, and it works** — but see the
+   conflict above: the hosted server cannot inject input under the app uid.
 6. ~~Remove the debug receiver before anything ships.~~ **Done differently** — gated behind
    `debug.tvassist.probe`, so a release build registers nothing unless explicitly enabled.
-7. Test on real Fire TV hardware. Everything here is one emulator image.
+7. Decide the conflict above. Test on an **API 34** Android TV image first: if
+   `GLOBAL_ACTION_DPAD_*` drives a real TV UI, the app route is viable there and the design
+   becomes "app performs actions, server routes". If not, this app is a persistence
+   mechanism for a remote that cannot press anything, and should be abandoned.
+8. Provisioning still needs solving. `key.pem` and `token` are `0600 shell` in the staging
+   directory, so the app cannot read them (measured: `copied=2/4`, EACCES on exactly those
+   two). Loosening them even briefly re-creates the world-readable-private-key bug the
+   parent repo already fixed once. The clean answer is for the server to generate its own
+   certificate and token on the device, so nothing is ever staged.
+9. Test on real Fire TV hardware. Everything here is one emulator image.

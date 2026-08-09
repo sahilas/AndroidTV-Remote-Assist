@@ -39,10 +39,15 @@ class RemoteAssistService : AccessibilityService() {
                 "longpress" -> Log.i(TAG, "RESULT longpress=${longPressFocused()}")
                 "describe" -> Log.i(TAG, "RESULT focus=${describeFocus()}")
                 "exec" -> Log.i(TAG, "RESULT exec=${execFromNativeLibDir()}")
+                "provision" -> Log.i(TAG, "RESULT provision=${server.provisionFrom(ServerProcess.STAGING)}")
+                "start" -> Log.i(TAG, "RESULT start=${server.start()}")
+                "stop" -> Log.i(TAG, "RESULT stop=${server.stop()}")
+                "status" -> Log.i(TAG, "RESULT status=running=${server.isRunning()} provisioned=${server.provisioned()} dir=${server.dataDir}")
             }
         }
     }
 
+    private val server by lazy { ServerProcess(this) }
     private var probeRegistered = false
 
     override fun onServiceConnected() {
@@ -55,6 +60,17 @@ class RemoteAssistService : AccessibilityService() {
             probeRegistered = true
             Log.i(TAG, "probe receiver registered (debug.tvassist.probe=1)")
         }
+
+        // This is the reason the app exists. The system starts an enabled
+        // AccessibilityService on every boot, so starting the server here is what
+        // makes it survive a reboot on a box where init cannot be used.
+        //
+        // Re-provision on every connect rather than only when unprovisioned: a
+        // redeploy stages fresh material (a rotated token, a regenerated
+        // certificate), and silently keeping the old copy would look exactly like
+        // the deploy having no effect.
+        Log.i(TAG, "provision: ${server.provisionFrom(ServerProcess.STAGING)}")
+        Log.i(TAG, "autostart: ${server.start()}")
     }
 
     /** Reads a system property without the hidden SystemProperties API. */
@@ -69,6 +85,10 @@ class RemoteAssistService : AccessibilityService() {
 
     override fun onDestroy() {
         if (probeRegistered) runCatching { unregisterReceiver(debug) }
+        // Do not leave an orphan holding the port: a survivor makes the next start
+        // fail on bind while the old binary keeps serving, so a health check would
+        // pass against code you thought you had replaced.
+        Log.i(TAG, "shutdown: ${server.stop()}")
         super.onDestroy()
     }
 

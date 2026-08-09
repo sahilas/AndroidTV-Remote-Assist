@@ -1,6 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- The Go server is exec'd as a child of this app and therefore inherits this
+         uid. Without INTERNET the uid is not in the `inet` group and every socket()
+         fails with EPERM. Measured symptom: "listen tcp :8443: socket: operation
+         not permitted", which reads like a port conflict and is not one. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <!-- A TV box has no touchscreen in any meaningful sense. Declaring these
          optional keeps the package installable on TV hardware, which is the only
          hardware this targets. -->
