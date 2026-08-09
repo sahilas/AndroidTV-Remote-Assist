@@ -354,9 +354,10 @@ Enforcing, API 31).
 7. ~~Test `GLOBAL_ACTION_DPAD_*` on API 34.~~ **Done — it works** (on a phone image; a TV
    image is still owed). The design becomes "app performs the actions, server routes", and
    the app is viable on API 34+ only.
-8. Provisioning still needs solving. `key.pem` and `token` are `0600 shell` in the staging
-   directory, so the app cannot read them (measured: `copied=2/4`, EACCES on exactly those
-   two). Loosening them even briefly re-creates the world-readable-private-key bug the
-   parent repo already fixed once. The clean answer is for the server to generate its own
-   certificate and token on the device, so nothing is ever staged.
+8. ~~Provisioning.~~ **Solved in the parent repo** — the server now generates its own CA,
+   leaf and token into `-dir` when none are present, so nothing is staged and the private
+   key never crosses adb. The app therefore does not need `provisionFrom` at all for a
+   fresh install; that path remains only for adopting an existing deployment's material.
+   Verified against Apple's evaluator and with `curl --cacert`, and it will not overwrite a
+   certificate pushed by `deploy.sh`.
 9. Test on real Fire TV hardware. Everything here is one emulator image.
