@@ -35,6 +35,8 @@ android {
 
     // Load-bearing: a library compressed inside the APK is not a file on disk and
     // cannot be executed. Measured -- without this, exec from nativeLibraryDir fails.
+    buildFeatures { buildConfig = true }
+
     packaging { jniLibs { useLegacyPackaging = true } }
 
     signingConfigs {

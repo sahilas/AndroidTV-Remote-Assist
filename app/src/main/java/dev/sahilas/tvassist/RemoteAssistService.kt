@@ -42,6 +42,7 @@ class RemoteAssistService : AccessibilityService() {
                 "provision" -> Log.i(TAG, "RESULT provision=${server.provisionFrom(ServerProcess.STAGING)}")
                 "start" -> Log.i(TAG, "RESULT start=${server.start()}")
                 "stop" -> Log.i(TAG, "RESULT stop=${server.stop()}")
+                "dpad" -> Log.i(TAG, "RESULT dpad=${dpad(i.getStringExtra("dir") ?: "down")}")
                 "status" -> Log.i(TAG, "RESULT status=running=${server.isRunning()} provisioned=${server.provisioned()} dir=${server.dataDir}")
             }
         }
@@ -56,9 +57,19 @@ class RemoteAssistService : AccessibilityService() {
         Log.i(TAG, "connected; sdk=${android.os.Build.VERSION.SDK_INT} abi=$abi " +
             "nativeLibDir=${applicationInfo.nativeLibraryDir}")
         if (probeEnabled()) {
-            registerReceiver(debug, IntentFilter(DEBUG_ACTION))
+            // From API 34 registerReceiver THROWS unless an export flag is given,
+            // and this runs inside onServiceConnected -- so the omission killed the
+            // rest of the callback silently. Everything after it (provisioning, the
+            // server autostart) simply never ran, while the service still logged
+            // "connected" and looked healthy.
+            if (android.os.Build.VERSION.SDK_INT >= 33) {
+                registerReceiver(debug, IntentFilter(DEBUG_ACTION), Context.RECEIVER_EXPORTED)
+            } else {
+                @Suppress("UnspecifiedRegisterReceiverFlag")
+                registerReceiver(debug, IntentFilter(DEBUG_ACTION))
+            }
             probeRegistered = true
-            Log.i(TAG, "probe receiver registered (debug.tvassist.probe=1)")
+            Log.i(TAG, "probe receiver registered")
         }
 
         // This is the reason the app exists. The system starts an enabled
@@ -69,18 +80,37 @@ class RemoteAssistService : AccessibilityService() {
         // redeploy stages fresh material (a rotated token, a regenerated
         // certificate), and silently keeping the old copy would look exactly like
         // the deploy having no effect.
-        Log.i(TAG, "provision: ${server.provisionFrom(ServerProcess.STAGING)}")
-        Log.i(TAG, "autostart: ${server.start()}")
+        runCatching { Log.i(TAG, "provision: ${server.provisionFrom(ServerProcess.STAGING)}") }
+            .onFailure { Log.e(TAG, "provision threw: $it") }
+        runCatching { Log.i(TAG, "autostart: ${server.start()}") }
+            .onFailure { Log.e(TAG, "autostart threw: $it") }
     }
 
-    /** Reads a system property without the hidden SystemProperties API. */
-    private fun probeEnabled(): Boolean = try {
-        val p = ProcessBuilder("/system/bin/getprop", PROBE_PROP).start()
-        val v = p.inputStream.bufferedReader().readText().trim()
-        p.waitFor()
-        v == "1"
-    } catch (e: Exception) {
-        false
+    /**
+     * Reads the probe property.
+     *
+     * Reflection first, exec second: measured on SDK 37, an app cannot run
+     * /system/bin/getprop at all, so the exec form silently returns false and the
+     * probe can never be enabled. It fails closed, which is the safe direction, but
+     * it also made the mechanism useless on newer Android.
+     *
+     * A debug build always registers, so the capability probes remain usable
+     * without weakening the release build.
+     */
+    private fun probeEnabled(): Boolean {
+        if (BuildConfig.DEBUG) return true
+        runCatching {
+            val c = Class.forName("android.os.SystemProperties")
+            val get = c.getMethod("get", String::class.java)
+            if ((get.invoke(null, PROBE_PROP) as? String) == "1") return true
+        }
+        runCatching {
+            val p = ProcessBuilder("/system/bin/getprop", PROBE_PROP).start()
+            val v = p.inputStream.bufferedReader().readText().trim()
+            p.waitFor()
+            if (v == "1") return true
+        }
+        return false
     }
 
     override fun onDestroy() {
@@ -164,6 +194,41 @@ class RemoteAssistService : AccessibilityService() {
         // claim success when the target actually declares the action.
         val t = longClickTarget() ?: return false
         return t.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK)
+    }
+
+    /**
+     * GLOBAL_ACTION_DPAD_* was added in API 34. Before that there is no
+     * accessibility route to directional navigation at all, which is the whole
+     * question for whether this app can drive a TV.
+     *
+     * Reports focus before and after, because performGlobalAction's return value
+     * has already been shown to lie once: ACTION_LONG_CLICK returned true on a node
+     * that did not support it. A moved focus is the only real evidence.
+     */
+    fun dpad(dir: String): String {
+        if (android.os.Build.VERSION.SDK_INT < 34) {
+            return "unsupported: sdk=${android.os.Build.VERSION.SDK_INT} needs 34"
+        }
+        val action = when (dir) {
+            "up" -> AccessibilityService.GLOBAL_ACTION_DPAD_UP
+            "down" -> AccessibilityService.GLOBAL_ACTION_DPAD_DOWN
+            "left" -> AccessibilityService.GLOBAL_ACTION_DPAD_LEFT
+            "right" -> AccessibilityService.GLOBAL_ACTION_DPAD_RIGHT
+            "center" -> AccessibilityService.GLOBAL_ACTION_DPAD_CENTER
+            else -> return "unknown direction: $dir"
+        }
+        val before = focusSignature()
+        val returned = performGlobalAction(action)
+        Thread.sleep(600)
+        val after = focusSignature()
+        return "dir=$dir returned=$returned moved=${before != after} before=[$before] after=[$after]"
+    }
+
+    /** Enough of the focused node to tell whether focus actually moved. */
+    private fun focusSignature(): String {
+        val n = focused() ?: return "none"
+        val r = android.graphics.Rect().also { n.getBoundsInScreen(it) }
+        return "${n.className}|${n.text}|${n.contentDescription}|$r"
     }
 
     /**

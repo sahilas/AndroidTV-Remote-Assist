@@ -240,6 +240,57 @@ Also degraded under the app uid: mDNS. `net.InterfaceAddrs()` returns nothing, l
 `mdns: no non-loopback IPv4 found`, because interface enumeration is restricted for apps.
 The IP still works; only the `.local` name is lost.
 
+## D-pad on API 34+: it works
+
+The blocking question was whether `GLOBAL_ACTION_DPAD_*` (API 34) can drive directional
+navigation, because without D-pad the app can offer persistence for a remote that cannot
+press anything. Measured on an **SDK 37** image:
+
+| dir | focus before | focus after |
+|---|---|---|
+| down | none | `Rect(48,183–1296,399)` |
+| down | ↑ | `Rect(0,441–1344,659)` |
+| down | ↑ | `Rect(0,707–1344,925)` |
+| **up** | ↑ | `Rect(0,441–1344,659)` — back to the exact previous row |
+| center | ↑ | none — item activated |
+
+Focus movement is the evidence, not the return value: `performAction` has already been caught
+returning `true` for a no-op here, so `returned=true` proves nothing. `up` landing back on the
+precise prior rectangle is what makes this real directional navigation rather than coincidence.
+
+**So the app is viable on API 34+ and not on API 31.** Both boxes owned are API 31, so this
+cannot be shipped to them — but the design is sound for newer hardware, and Fire TV and
+Google TV devices shipping today are largely past 34.
+
+⚠️ **Not yet verified on a leanback UI.** The image tested is a phone image
+(`android.software.leanback` absent) because no API 34+ *TV* system image was installed and
+pulling one needs cmdline-tools plus roughly 1.5 GB. A TV launcher handles focus differently
+enough that this should be re-run on an API 34 TV image before anything is built on it.
+
+### Three defects the API 34+ image exposed
+
+None of these appear on API 31, and all would have shipped:
+
+1. **`registerReceiver` throws from API 34** unless an export flag is passed. It was called
+   inside `onServiceConnected`, so the exception killed the rest of the callback —
+   provisioning and the server autostart never ran, while the service still logged
+   "connected" and looked healthy. Now flagged `RECEIVER_EXPORTED`, and each step of the
+   callback is individually guarded so one failure cannot silently disable the others.
+2. **An app cannot exec `/system/bin/getprop` on SDK 37.** The probe gate read the property
+   that way, so it always returned false and the probe could never be enabled. It failed
+   closed, which is the safe direction, but the mechanism was useless. Now reads
+   `android.os.SystemProperties` by reflection, with exec as a fallback.
+3. **Sideloaded accessibility services are blocked by restricted settings.** Writing
+   `enabled_accessibility_services` silently reverts to `null`. The override is:
+
+   ```bash
+   adb shell appops set dev.sahilas.tvassist ACCESS_RESTRICTED_SETTINGS allow
+   ```
+
+   Required before the setting will stick, and it did not exist on API 31. Any deploy script
+   targeting modern Android needs this, and needs to verify the setting held rather than
+   assuming the write worked.
+
 ## Status
 
 Scaffold. Gradle project, manifest, service config, and a service that builds, installs,
@@ -266,10 +317,9 @@ Enforcing, API 31).
    conflict above: the hosted server cannot inject input under the app uid.
 6. ~~Remove the debug receiver before anything ships.~~ **Done differently** — gated behind
    `debug.tvassist.probe`, so a release build registers nothing unless explicitly enabled.
-7. Decide the conflict above. Test on an **API 34** Android TV image first: if
-   `GLOBAL_ACTION_DPAD_*` drives a real TV UI, the app route is viable there and the design
-   becomes "app performs actions, server routes". If not, this app is a persistence
-   mechanism for a remote that cannot press anything, and should be abandoned.
+7. ~~Test `GLOBAL_ACTION_DPAD_*` on API 34.~~ **Done — it works** (on a phone image; a TV
+   image is still owed). The design becomes "app performs the actions, server routes", and
+   the app is viable on API 34+ only.
 8. Provisioning still needs solving. `key.pem` and `token` are `0600 shell` in the staging
    directory, so the app cannot read them (measured: `copied=2/4`, EACCES on exactly those
    two). Loosening them even briefly re-creates the world-readable-private-key bug the
