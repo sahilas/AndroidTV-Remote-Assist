@@ -10,6 +10,7 @@
     <application
         android:label="TV Remote Assist"
         android:allowBackup="false"
+        android:extractNativeLibs="true"
         android:supportsRtl="true">
 
         <!-- The whole point of the app. Once enabled, the system starts this

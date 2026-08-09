@@ -12,3 +12,6 @@ local.properties
 .idea/
 *.iml
 .DS_Store
+
+# test-only: the Go binary is copied in to answer the nativeLibraryDir exec question
+app/src/main/jniLibs/

@@ -16,7 +16,12 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0-scaffold"
+        // The bundled binary must be a real file on disk for exec to work; a
+        // compressed-in-APK library is not executable.
+        ndk { abiFilters += listOf("arm64-v8a") }
     }
+
+    packaging { jniLibs { useLegacyPackaging = true } }
 
     buildTypes {
         release {
