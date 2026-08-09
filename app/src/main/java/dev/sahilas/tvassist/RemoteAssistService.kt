@@ -177,7 +177,7 @@ class RemoteAssistService : AccessibilityService() {
     fun describeFocus(): String {
         val n = focused() ?: return "none (windows=${windows.size})"
         val t = longClickTarget()
-        return "cls=${n.className} pkg=${n.packageName} " +
+        return "sig=${focusSignature()} " +
             "declaresLongClick=${n.declaresLongClick()} | " +
             "target=${t?.className ?: "NONE"} targetDeclares=${t?.declaresLongClick()}"
     }
@@ -219,8 +219,18 @@ class RemoteAssistService : AccessibilityService() {
         }
         val before = focusSignature()
         val returned = performGlobalAction(action)
-        Thread.sleep(600)
-        val after = focusSignature()
+        // Poll rather than sleep a fixed interval. A TV launcher animates focus, and
+        // a single 600ms sample reported "did not move" for movement that simply had
+        // not landed yet -- a false negative that would have condemned the whole
+        // approach.
+        var after = before
+        val deadline = System.currentTimeMillis() + 3000
+        while (System.currentTimeMillis() < deadline) {
+            Thread.sleep(150)
+            val now = focusSignature()
+            if (now != before) { after = now; break }
+            after = now
+        }
         return "dir=$dir returned=$returned moved=${before != after} before=[$before] after=[$after]"
     }
 

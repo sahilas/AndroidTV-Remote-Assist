@@ -262,10 +262,44 @@ precise prior rectangle is what makes this real directional navigation rather th
 cannot be shipped to them — but the design is sound for newer hardware, and Fire TV and
 Google TV devices shipping today are largely past 34.
 
-⚠️ **Not yet verified on a leanback UI.** The image tested is a phone image
-(`android.software.leanback` absent) because no API 34+ *TV* system image was installed and
-pulling one needs cmdline-tools plus roughly 1.5 GB. A TV launcher handles focus differently
-enough that this should be re-run on an API 34 TV image before anything is built on it.
+### Confirmed on a real leanback UI (API 34 Android TV)
+
+Re-run on `system-images;android-34;android-tv;arm64-v8a` — Android 14, SELinux Enforcing,
+`user` build, `android.software.leanback` present. This is the hardware profile the project
+targets.
+
+Leanback **Settings**, which has no edge-of-row ambiguity, is the clean signal:
+
+```
+down -> Rect(1200, 571 - 1920, 700)
+down -> Rect(1200, 632 - 1920, 728)
+up   -> Rect(1200, 563 - 1920, 692)
+```
+
+TV **launcher**: `down`, `left`, `right` and `up` all moved focus, `up` returning to the
+previously focused tile.
+
+**So directional navigation works on API 34 Android TV.** The design — app performs the
+actions, server routes — is viable, on API 34+ only.
+
+#### A false negative that nearly killed the project
+
+The first run on this image reported `moved=false` for every direction, which read as a flat
+"the API does nothing on TV". It was a measurement artifact, and two things caught it:
+
+- A **control** with real `input keyevent KEYCODE_DPAD_DOWN` showed the focused node
+  changing, proving the detector worked and the fault was in how it sampled.
+- The focus signature was read once, 600 ms after the action. A TV launcher animates focus;
+  600 ms was sometimes too early. Sampling now polls for up to 3 s and stops on the first
+  change.
+
+Residual noise worth knowing: mid-animation the launcher's focus bounds shift by a single
+pixel — `Rect(109,160-600,436)` then `Rect(110,160-601,436)` — so exact-bounds equality
+occasionally reports a spurious move or non-move on the launcher. Settings, which does not
+animate the same way, is the reliable surface to measure on.
+
+The general lesson, twice now on this project: `performAction`/`performGlobalAction` return
+values are not evidence, and neither is a single sample taken at a fixed delay.
 
 ### Three defects the API 34+ image exposed
 
